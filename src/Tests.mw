@@ -1,0 +1,139 @@
+-- The port against the crate: every case in `Cases.mw`, whose expected results
+-- came from calling base64 itself, plus a few examples.
+--
+-- Every declaration carries `@cfg(test)`, as the tests are no part of the
+-- package.
+
+@cfg(test)
+use Std.Test (assertEq)
+@cfg(test)
+use Std.Collections.Vector as V
+@cfg(test)
+use Std.St as St
+@cfg(test)
+use base64.Cases (cases)
+@cfg(test)
+use base64.Base64
+
+@cfg(test)
+fun digit i = toInt (stringByteAt cases i) - 48
+
+@cfg(test)
+fun num i n =
+  let rec go k acc = if k >= n then acc else go (k + 1) (acc * 64 + digit (i + k)) in
+  (go 0 0, i + n)
+
+@cfg(test)
+fun str i =
+  let len = fst (num i 3) in
+  (stringSlice cases (i + 3) (i + 3 + len), i + 3 + len)
+
+@cfg(test)
+fun hexValue c = if c <= 57 then c - 48 else c - 87
+
+-- Bytes from their hex digits.
+@cfg(test)
+fun unhex s =
+  runSt (\() ->
+    let n = stringByteLength s / 2 in
+    let buf = St.newArray n (toUInt8 0) in
+    let at = \i -> hexValue (toInt (stringByteAt s i)) in
+    let _ = St.forRange 0 n (\k -> St.set buf k (toUInt8 (at (2 * k) * 16 + at (2 * k + 1)))) in
+    St.freeze buf)
+
+@cfg(test)
+fun hex (b : #[UInt8]) =
+  let digitOf = \d -> if d < 10 then charFromCode (48 + d) else charFromCode (87 + d) in
+  let pairOf = \x -> [digitOf (x / 16), digitOf (x % 16)] in
+  charsToString
+    (
+      V.toArray
+        (V.concatMap (\i -> pairOf (toInt (arrayGet b i))) (V.range 0 (arrayLen b)))
+    )
+
+@cfg(test)
+def alphabets =
+  [standardAlphabet, urlSafeAlphabet, cryptAlphabet, bcryptAlphabet, imapMutf7Alphabet, binHexAlphabet]
+
+@cfg(test)
+def modes = [PaddingMode.Indifferent, PaddingMode.RequireCanonical, PaddingMode.RequireNone]
+
+-- An engine at `i`, and where it ends.
+@cfg(test)
+fun readEngine i =
+  let d = \k -> fst (num (i + k) 1) in
+  let a = V.getOr standardAlphabet alphabets (d 0) in
+  let mode = V.getOr PaddingMode.Indifferent modes (d 3) in
+  let c = Config { encodePadding = d 1 == 1, decodeAllowTrailingBits = d 2 == 1, decodePaddingMode = mode } in
+  (engine a c, i + 4)
+
+@cfg(test)
+fun runCase i =
+  let kind = fst (num i 1) in
+  if kind == 0
+  then
+    let e = readEngine (i + 1) in
+    let input = str (snd e) in
+    let expected = str (snd input) in
+    (fst input, fst expected, encode (fst e) (unhex (fst input)), snd expected)
+  else if kind == 1
+  then
+    let e = readEngine (i + 1) in
+    let input = str (snd e) in
+    let ok = num (snd input) 1 in
+    let expected = str (snd ok) in
+    let want = if fst ok == 1 then "ok " ++ fst expected else "error " ++ fst expected in
+    let got =
+      match decodeBytes (fst e) (unhex (fst input)) with
+      | Ok b -> "ok " ++ hex b
+      | Err err -> "error " ++ decodeErrorMessage err
+    in
+    (fst input, want, got, snd expected)
+  else if kind == 2
+  then
+    let input = str (i + 1) in
+    let ok = num (snd input) 1 in
+    let expected = str (snd ok) in
+    let want = if fst ok == 1 then "ok " ++ fst expected else "error " ++ fst expected in
+    let got =
+      match alphabet (fst input) with
+      | Ok (a : Alphabet) -> "ok " ++ a.symbols
+      | Err err -> "error " ++ alphabetErrorMessage err
+    in
+    (fst input, want, got, snd expected)
+  else
+    let n = num (i + 1) 6 in
+    let a = num (snd n) 6 in
+    let b = num (snd a) 6 in
+    let c = num (snd b) 6 in
+    let want = "${fst a} ${fst b} ${fst c}" in
+    let lens = "${encodedLen (fst n) False} ${encodedLen (fst n) True}" in
+    let got = "${lens} ${decodedLenEstimate (fst n)}" in
+    ("${fst n}", want, got, snd c)
+
+@cfg(test)
+fun check i bad =
+  if i >= stringByteLength cases
+  then bad
+  else
+    match runCase i with
+    | (input, expected, got, next) ->
+        check next (if expected == got then bad else V.pushBack bad (input, expected, got))
+
+-- Failures list (input, expected, actual).
+@cfg(test)
+@test fun resultsMatchTheCrate () =
+  assertEq (V.take (check 0 V.empty) 3) [] "cases where the port and base64 differ"
+
+@cfg(test)
+@test fun examples () =
+  let a = assertEq (encodeString standard "hello") "aGVsbG8=" "standard" in
+  let b = assertEq (encodeString urlSafeNoPad "\u{ff}\u{fe}") "w7_Dvg" "URL-safe, no padding" in
+  let c =
+    match decode standard "aGVsbG8=" with
+    | Ok bytes -> assertEq (bytesToString bytes) "hello" "decode"
+    | Err err -> assertEq (decodeErrorMessage err) "" "decode"
+  in
+  match decode standard "aGVsbG8" with
+  | Ok bytes -> assertEq "decoded" "an error" "padding required"
+  | Err err -> assertEq (decodeErrorMessage err) "Invalid padding" "padding required"

@@ -1,0 +1,8 @@
+base64 (the Meadow package) is a port of the Rust crate base64
+(https://github.com/marshallpierce/rust-base64), version 0.22.1, by Marshall
+Pierce and contributors, to Meadow. Its test cases are generated from that
+crate, and its code is translated from the crate's source.
+
+The crate is dual-licensed under the Apache License, Version 2.0, and the MIT
+license, and so is this port, at your option: see LICENSE-APACHE and
+LICENSE-MIT.

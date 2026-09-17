@@ -1,0 +1,300 @@
+-- Base64: the crate's `GeneralPurpose` engine, its alphabets and configs,
+-- and its errors word for word.
+--
+-- Copyright Marshall Pierce, and the Meadow port's authors. Dual-licensed
+-- under Apache-2.0 or MIT: see COPYRIGHT.
+
+use Std.St as St
+
+-- --- alphabets ----------------------------------------------------------------------------
+
+-- 64 distinct printable ASCII symbols, none of them `=`.
+@pub record Alphabet = { symbols : String }
+
+@pub data AlphabetError =
+  InvalidLength
+  | DuplicatedByte UInt8
+  | UnprintableByte UInt8
+  | ReservedByte UInt8
+
+fun hexByte (b : UInt8) =
+  let digit = \d -> if d < 10 then charFromCode (48 + d) else charFromCode (87 + d) in
+  let n = toInt b in
+  "0x" ++ charsToString #[digit (n / 16), digit (n % 16)]
+
+@pub fun alphabetErrorMessage e =
+  match e with
+  | AlphabetError.InvalidLength -> "Invalid length - must be 64 bytes"
+  | AlphabetError.DuplicatedByte b -> "Duplicated byte: ${hexByte b}"
+  | AlphabetError.UnprintableByte b -> "Unprintable byte: ${hexByte b}"
+  | AlphabetError.ReservedByte b -> "Reserved byte: ${hexByte b}"
+
+fun byteOf s i = toInt (stringByteAt s i)
+
+-- `symbols` as an alphabet, if they make one. Checked a symbol at a time, in
+-- order, as the crate checks them.
+@pub fun alphabet symbols =
+  if stringByteLength symbols != 64
+  then Err AlphabetError.InvalidLength
+  else
+    let rec check i =
+      if i >= 64
+      then Ok (Alphabet { symbols = symbols })
+      else
+        let b = byteOf symbols i in
+        if b < 32 or b > 126
+        then Err (AlphabetError.UnprintableByte (toUInt8 b))
+        else if b == 61
+        then Err (AlphabetError.ReservedByte (toUInt8 b))
+        else
+          let rec dup j =
+            if j >= 64 then False else if j != i and byteOf symbols j == b then True else dup (j + 1)
+          in
+          if dup 0 then Err (AlphabetError.DuplicatedByte (toUInt8 b)) else check (i + 1)
+    in
+    check 0
+
+-- The alphabets the crate names.
+@pub def standardAlphabet =
+  Alphabet { symbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" }
+
+@pub def urlSafeAlphabet =
+  Alphabet { symbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" }
+
+@pub def cryptAlphabet =
+  Alphabet { symbols = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" }
+
+@pub def bcryptAlphabet =
+  Alphabet { symbols = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" }
+
+@pub def imapMutf7Alphabet =
+  Alphabet { symbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+," }
+
+@pub def binHexAlphabet =
+  Alphabet { symbols = "!\"#$%&'()*+,-012345689@ABCDEFGHIJKLMNPQRSTUVXYZ[`abcdefhijklmpqr" }
+
+-- --- engines ----------------------------------------------------------------------------
+
+-- How decoding treats `=` padding.
+@pub data PaddingMode =
+  -- Padding may be there or not.
+  Indifferent
+  -- Padding must be there, as much as makes the length a multiple of four.
+  | RequireCanonical
+  -- There must be no padding.
+  | RequireNone
+
+@pub record Config = {
+  -- Whether encoding pads its output with `=` to a multiple of four.
+  encodePadding : Bool,
+  -- Whether decoding accepts a last symbol with bits set that no byte uses.
+  decodeAllowTrailingBits : Bool,
+  decodePaddingMode : PaddingMode
+}
+
+-- Pad when encoding, require canonical padding when decoding.
+@pub def pad =
+  Config {
+    encodePadding = True,
+    decodeAllowTrailingBits = False,
+    decodePaddingMode = PaddingMode.RequireCanonical
+  }
+
+-- No padding either way.
+@pub def noPad =
+  Config {
+    encodePadding = False,
+    decodeAllowTrailingBits = False,
+    decodePaddingMode = PaddingMode.RequireNone
+  }
+
+-- An alphabet and a config, with the alphabet's decoding table: the value of
+-- each byte, or 255 for none.
+@pub record Engine = { alphabet : Alphabet, config : Config, decodeTable : #[Int] }
+
+@pub fun engine (a : Alphabet) (c : Config) =
+  let table =
+    runSt (\() ->
+      let t = St.newArray 256 255 in
+      let _ = St.forRange 0 64 (\i -> St.set t (byteOf a.symbols i) i) in
+      St.freeze t)
+  in
+  Engine { alphabet = a, config = c, decodeTable = table }
+
+@pub def standard = engine standardAlphabet pad
+
+@pub def standardNoPad = engine standardAlphabet noPad
+
+@pub def urlSafe = engine urlSafeAlphabet pad
+
+@pub def urlSafeNoPad = engine urlSafeAlphabet noPad
+
+-- --- lengths --------------------------------------------------------------------------------
+
+-- How long the encoding of `n` bytes is.
+@pub fun encodedLen n padding =
+  let whole = n / 3 * 4 in
+  let rem = n % 3 in
+  if rem == 0 then whole else if padding then whole + 4 else whole + (if rem == 1 then 2 else 3)
+
+-- At least how many bytes `n` symbols decode to.
+@pub fun decodedLenEstimate n = (n / 4 + (if n % 4 > 0 then 1 else 0)) * 3
+
+-- --- encoding ---------------------------------------------------------------------------
+
+-- `input` in base64, by `e`.
+@pub fun encode (e : Engine) (input : #[UInt8]) =
+  let n = arrayLen input in
+  let symbols = e.alphabet.symbols in
+  let size = encodedLen n e.config.encodePadding in
+  let at = \i -> toInt (arrayGet input i) in
+  let sym = \v -> stringByteAt symbols v in
+  let out =
+    runSt (\() ->
+      let buf = St.newArray size (toUInt8 61) in
+      let whole = n / 3 in
+      let _ =
+        St.forRange 0 whole (\k ->
+          let i = 3 * k in
+          let o = 4 * k in
+          let v = (at i * 256 + at (i + 1)) * 256 + at (i + 2) in
+          let _ = St.set buf o (sym (v / 262144)) in
+          let _ = St.set buf (o + 1) (sym (v / 4096 % 64)) in
+          let _ = St.set buf (o + 2) (sym (v / 64 % 64)) in
+          St.set buf (o + 3) (sym (v % 64)))
+      in
+      let i = 3 * whole in
+      let o = 4 * whole in
+      let rem = n % 3 in
+      let _ =
+        if rem == 2
+        then
+          let v = at i * 256 + at (i + 1) in
+          let _ = St.set buf o (sym (v / 1024)) in
+          let _ = St.set buf (o + 1) (sym (v / 16 % 64)) in
+          St.set buf (o + 2) (sym (v * 4 % 64))
+        else if rem == 1
+        then
+          let v = at i in
+          let _ = St.set buf o (sym (v / 4)) in
+          St.set buf (o + 1) (sym (v * 16 % 64))
+        else ()
+      in
+      St.freeze buf)
+  in
+  bytesToString out
+
+-- The UTF-8 of `s`, in base64.
+@pub fun encodeString (e : Engine) s = encode e (stringToBytes s)
+
+-- --- decoding ---------------------------------------------------------------------------
+
+@pub data DecodeError =
+  -- A byte that is not a symbol, where it is.
+  InvalidByte Int UInt8
+  -- The input ends with a lone symbol.
+  | InvalidLength Int
+  -- The last symbol has bits set that no byte uses.
+  | InvalidLastSymbol Int UInt8
+  -- Padding where the mode forbids it, or not enough.
+  | InvalidPadding
+
+@pub fun decodeErrorMessage e =
+  match e with
+  | DecodeError.InvalidByte i b -> "Invalid symbol ${b}, offset ${i}."
+  | DecodeError.InvalidLength n -> "Invalid input length: ${n}"
+  | DecodeError.InvalidLastSymbol i b -> "Invalid last symbol ${b}, offset ${i}."
+  | DecodeError.InvalidPadding -> "Invalid padding"
+
+-- The first byte from `from` to `to` that is not a symbol, as an error, or
+-- `None`.
+fun firstInvalid (table : #[Int]) (input : #[UInt8]) from to =
+  if from >= to
+  then None
+  else if arrayGet table (toInt (arrayGet input from)) == 255
+  then Just (DecodeError.InvalidByte from (arrayGet input from))
+  else firstInvalid table input (from + 1) to
+
+-- `input`, decoded by `e`.
+@pub fun decodeBytes (e : Engine) (input : #[UInt8]) =
+  let n = arrayLen input in
+  let table = e.decodeTable in
+  let rem = n % 4 in
+  let lastByte = if n > 0 then arrayGet input (n - 1) else toUInt8 0 in
+  if rem == 1 and toInt lastByte != 61 and arrayGet table (toInt lastByte) == 255
+  then Err (DecodeError.InvalidByte (n - 1) lastByte)
+  else
+    let body = if n < rem then 0 else if rem == 0 then (if n >= 4 then n - 4 else 0) else n - rem in
+    match firstInvalid table input 0 body with
+    | Just err -> Err err
+    | None -> decodeSuffix e input body
+
+fun decodeSuffix (e : Engine) (input : #[UInt8]) start =
+  let n = arrayLen input in
+  let table = e.decodeTable in
+  -- Read the leftover symbols: morsels, padding count, where padding started.
+  let rec scan k morsels pads firstPad lastSymbol =
+    if start + k >= n
+    then Ok (morsels, pads, firstPad, lastSymbol)
+    else
+      let b = arrayGet input (start + k) in
+      if toInt b == 61
+      then
+        if k < 2
+        then Err (DecodeError.InvalidByte (start + k) b)
+        else scan (k + 1) morsels (pads + 1) (if pads == 0 then k else firstPad) lastSymbol
+      else if pads > 0
+      then Err (DecodeError.InvalidByte (start + firstPad) (toUInt8 61))
+      else
+        let m = arrayGet table (toInt b) in
+        if m == 255
+        then Err (DecodeError.InvalidByte (start + k) b)
+        else scan (k + 1) (arrayPush morsels m) pads firstPad b
+  in
+  match scan 0 #[] 0 0 (toUInt8 0) with
+  | Err err -> Err err
+  | Ok (morsels, pads, firstPad, lastSymbol) ->
+      let count = arrayLen morsels in
+      if n > 0 and count < 2
+      then Err (DecodeError.InvalidLength (start + count))
+      else if
+      (
+        match e.config.decodePaddingMode with
+        | PaddingMode.Indifferent -> False
+        | PaddingMode.RequireCanonical -> (pads + count) % 4 != 0
+        | PaddingMode.RequireNone -> pads > 0
+      )
+      then Err DecodeError.InvalidPadding
+      else
+        let m = \k -> if k < count then arrayGet morsels k else 0 in
+        -- The leftover as a 24-bit number, symbols from the top.
+        let value = ((m 0 * 64 + m 1) * 64 + m 2) * 64 + m 3 in
+        let extra = count * 6 / 8 in
+        -- The bits below the bytes the leftover makes.
+        let scale = if extra == 0 then 16777216 else if extra == 1 then 65536 else if extra == 2 then 256 else 1 in
+        let unused = value % scale in
+        if not e.config.decodeAllowTrailingBits and unused != 0
+        then Err (DecodeError.InvalidLastSymbol (start + count - 1) lastSymbol)
+        else
+          let whole = start / 4 in
+          let out =
+            runSt (\() ->
+              let buf = St.newArray (whole * 3 + extra) (toUInt8 0) in
+              let at = \i -> arrayGet table (toInt (arrayGet input i)) in
+              let _ =
+                St.forRange 0 whole (\q ->
+                  let i = 4 * q in
+                  let v = ((at i * 64 + at (i + 1)) * 64 + at (i + 2)) * 64 + at (i + 3) in
+                  let o = 3 * q in
+                  let _ = St.set buf o (toUInt8 (v / 65536)) in
+                  let _ = St.set buf (o + 1) (toUInt8 (v / 256 % 256)) in
+                  St.set buf (o + 2) (toUInt8 (v % 256)))
+              in
+              let byteOf = \j -> value / (if j == 0 then 65536 else if j == 1 then 256 else 1) % 256 in
+              let _ = St.forRange 0 extra (\j -> St.set buf (whole * 3 + j) (toUInt8 (byteOf j))) in
+              St.freeze buf)
+          in
+          Ok out
+
+-- `text`, decoded by `e`.
+@pub fun decode (e : Engine) text = decodeBytes e (stringToBytes text)
