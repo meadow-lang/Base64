@@ -11,9 +11,9 @@ use Std.Collections.Vector as V
 @cfg(test)
 use Std.St as St
 @cfg(test)
-use base64.Cases (cases)
+use Base64.Cases (cases)
 @cfg(test)
-use base64.Base64
+use Base64.Base64
 
 @cfg(test)
 fun digit i = toInt (stringByteAt cases i) - 48

@@ -1,7 +1,7 @@
 -- base64: encoding bytes as text and back, by RFC 4648, with the alphabets
 -- and padding rules of Rust's `base64` crate, version 0.22.1.
 --
---   use base64 (standard, encodeString, decode)
+--   use Base64 (standard, encodeString, decode)
 --
 --   encodeString standard "hello"  -- "aGVsbG8="
 --   decode standard "aGVsbG8="     -- Ok #[104, 101, 108, 108, 111]
@@ -12,4 +12,4 @@ mod Cases
 @cfg(test)
 mod Tests
 
-@pub use base64.Base64
+@pub use Base64.Base64

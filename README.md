@@ -11,13 +11,13 @@ same alphabets and padding rules, and the same error messages.
 ## Install
 
 ```sh
-meadow add mcdearman/meadow-base64
+meadow add mcdearman/MeadowBase64
 ```
 
 ## Use
 
 ```meadow
-use base64 (standard, urlSafeNoPad, encodeString, decode, decodeErrorMessage)
+use Base64 (standard, urlSafeNoPad, encodeString, decode, decodeErrorMessage)
 
 def main =
   ( encodeString standard "hello",       -- "aGVsbG8="
