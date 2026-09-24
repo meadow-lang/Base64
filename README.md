@@ -11,7 +11,7 @@ same alphabets and padding rules, and the same error messages.
 ## Install
 
 ```sh
-meadow add mcdearman/MeadowBase64
+meadow add mcdearman/Base64
 ```
 
 ## Use
