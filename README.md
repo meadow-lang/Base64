@@ -2,7 +2,7 @@
 
 Encode bytes as Base64 text and decode it back
 ([RFC 4648](https://www.rfc-editor.org/rfc/rfc4648)), for
-[Meadow](https://github.com/mcdearman/meadow).
+[Meadow](https://github.com/meadow-lang/meadow).
 
 This package is a port of Rust's
 [`base64`](https://github.com/marshallpierce/rust-base64) 0.22.1. It has the
@@ -11,7 +11,7 @@ same alphabets and padding rules, and the same error messages.
 ## Install
 
 ```sh
-meadow add mcdearman/Base64
+meadow add meadow-lang/Base64
 ```
 
 ## Use
