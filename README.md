@@ -8,6 +8,14 @@ This package is a port of Rust's
 [`base64`](https://github.com/marshallpierce/rust-base64) 0.22.1. It has the
 same alphabets and padding rules, and the same error messages.
 
+## AI disclosure
+
+Base64 is written with AI coding agents: Anthropic's Claude, through Claude
+Code. Most of the code, the tests, the documentation and the commit messages in
+this repository were written by an agent, under the direction of the project's
+author, who decides the design and what goes in. Read it, and rely on it, with
+that in mind.
+
 ## Install
 
 ```sh
