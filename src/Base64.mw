@@ -75,8 +75,7 @@ fun byteOf s i = toInt (stringByteAt s i)
 
 -- How decoding treats `=` padding.
 @pub data PaddingMode
-  = -- Padding may be there or not.
-  Indifferent
+  = Indifferent -- Padding may be there or not.
   -- Padding must be there, as much as makes the length a multiple of four.
   | RequireCanonical
   -- There must be no padding.
@@ -187,8 +186,7 @@ fun byteOf s i = toInt (stringByteAt s i)
 -- --- decoding ---------------------------------------------------------------------------
 
 @pub data DecodeError
-  = -- A byte that is not a symbol, where it is.
-  InvalidByte Int UInt8
+  = InvalidByte Int UInt8 -- A byte that is not a symbol, where it is.
   -- The input ends with a lone symbol.
   | InvalidLength Int
   -- The last symbol has bits set that no byte uses.
